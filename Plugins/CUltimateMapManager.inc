@@ -1200,7 +1200,8 @@ namespace PRoConEvents {
                 }
                 for (int i=0; i < presetVars.Length; i++)
                 {
-                    presetVars[i] = presetVars[i].Replace("|", "-");
+                    presetVars[i] = presetVars[i].Replace("|", "&");
+                    presetVars[i] = presetVars[i].Replace("+", "&&");
                 }
                 if (newName.CompareTo(strVariable) == 0 || this.m_DPreset.ContainsKey(newName))
                 {
@@ -1420,7 +1421,7 @@ namespace PRoConEvents {
                     {
                         iValue = 0;
                     }
-                    else if (iValue > 64)
+                    else if (iValue > 70)
                     {
                         iValue = 64;
                     }
@@ -1435,7 +1436,7 @@ namespace PRoConEvents {
                     {
                         iValue = 0;
                     }
-                    else if (iValue > 64)
+                    else if (iValue > 70)
                     {
                         iValue = 64;
                     }
@@ -1733,7 +1734,7 @@ namespace PRoConEvents {
                 this.m_blCheckPlayerCount = false;
                 if (this.m_blRoundEnded && !this.m_blRestartRequested)
                 {
-                    this.ExecuteCommand("procon.protected.tasks.add", "CUltimateMapManager", "50", "1", "1", "procon.protected.plugins.call", "CUltimateMapManager", "CheckPlayerCount");
+                    this.ExecuteCommand("procon.protected.tasks.add", "CUltimateMapManager", "40", "1", "1", "procon.protected.plugins.call", "CUltimateMapManager", "CheckPlayerCount");
                 }
                 else
                 {
@@ -1833,7 +1834,14 @@ namespace PRoConEvents {
                     if (setting.Length > 0 && setting.Substring(0,1).CompareTo("#") != 0)
                     {
                         int split = setting.IndexOf(' ');
-                        this.ExecuteCommand("procon.protected.send", setting.Substring(0, split), setting.Substring(split+1).Trim('"'));
+
+                        string settingName = setting.Substring(0, split);
+                        string settingVal =  setting.Substring(split+1).Trim('"');
+                        settingVal = settingVal.Replace("&&", "+");
+                        settingVal = settingVal.Replace("&", "|");
+
+
+                        this.ExecuteCommand("procon.protected.send", settingName, settingVal);
                     }
                 }
             }
@@ -1848,7 +1856,13 @@ namespace PRoConEvents {
                     if (setting.Length > 0 && setting.Substring(0,1).CompareTo("#") != 0)
                     {
                         int split = setting.IndexOf(' ');
-                        this.ExecuteCommand("procon.protected.send", setting.Substring(0, split), setting.Substring(split+1).Trim('"'));
+
+                        string settingName = setting.Substring(0, split);
+                        string settingVal =  setting.Substring(split+1).Trim('"');
+                        settingVal = settingVal.Replace("&&", "+");
+                        settingVal = settingVal.Replace("&", "|");
+
+                        this.ExecuteCommand("procon.protected.send", settingName, settingVal);
                     }
                 }
             }
