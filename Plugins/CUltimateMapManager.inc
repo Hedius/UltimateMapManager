@@ -81,7 +81,11 @@ namespace PRoConEvents {
         private bool m_blUseSystemTZ;
         private string m_strVotedMapFileName;
         private string m_strVotedGameMode;
+        private string m_strPresetVotedMap;
         private int m_iCurrentRoundCount;
+        private enumBoolYesNo m_enPreserveVotedMap;
+        private bool m_blVotedMapMissing;
+        private bool m_blMapVoteRunning;
 
         private enumBoolYesNo m_enDoDebugOutput;
 
@@ -91,6 +95,8 @@ namespace PRoConEvents {
         private string m_strGameMod;
         private string m_strServerVersion;
         private string m_strPRoConVersion;
+
+        private DateTime m_dtLastCheck = DateTime.Now;
 
         private class MaplistConfig {
 
@@ -422,6 +428,10 @@ namespace PRoConEvents {
             this.m_LGPVList                 = new List<CPluginVariable>();
             this.m_blUseSystemTZ            = SecurityManager.IsGranted(new SecurityPermission(SecurityPermissionFlag.UnmanagedCode));
             this.m_strVotedMapFileName      = "";
+            this.m_strPresetVotedMap        = "";
+            this.m_enPreserveVotedMap       = enumBoolYesNo.No;
+            this.m_blMapVoteRunning         = false;
+            this.m_blVotedMapMissing        = false;
             this.m_strVotedGameMode         = "";
             this.m_iCurrentRoundCount       = 0;
 
@@ -442,7 +452,7 @@ namespace PRoConEvents {
         }
 
         public string GetPluginVersion() {
-            return "1.2.5.0";
+            return "1.2.6.1";
         }
 
         public string GetPluginAuthor() {
@@ -786,6 +796,7 @@ namespace PRoConEvents {
             this.m_blCheckPlayerCount = false;
             this.m_strCurrentPreset = "";
             this.m_iCurrentRoundCount = 0;
+            this.m_blMapVoteRunning = false;
         }
 
         // Lists only variables you want shown.. for instance enabling one option might hide another option 
@@ -836,6 +847,7 @@ namespace PRoConEvents {
                 this.m_LGDPVList.Add(new CPluginVariable("* Ultimate Map Manager|    Send preset commands after every round?", typeof(enumBoolYesNo), this.m_enPresetsAlways));
                 this.m_LGDPVList.Add(new CPluginVariable("* Ultimate Map Manager|    Allow additional presets to be sent after each level loads?", typeof(enumBoolYesNo), this.m_enLoadPresets));
             }
+            this.m_LGDPVList.Add(new CPluginVariable("* Ultimate Map Manager|Add voted map if a map list change removes it?", typeof(enumBoolYesNo), this.m_enPreserveVotedMap));
             this.m_LGDPVList.Add(new CPluginVariable("* Ultimate Map Manager|Add a new map list?", "enum.AddNewMapList(...|Create an empty map list|Create a map list based on current map list)", "..."));
             foreach (MaplistConfig MCMaplist in this.m_LMaplists)
             {
@@ -926,6 +938,7 @@ namespace PRoConEvents {
             this.m_LGPVList.Add(new CPluginVariable("    Ignore 'Switch to new map list immediately' setting for time-based changes?", typeof(enumBoolYesNo), this.m_enTimeNotNow));
             this.m_LGPVList.Add(new CPluginVariable("    Use system/layer server time zone?", typeof(enumBoolYesNo), this.m_enUseSystemTZ));
             this.m_LGPVList.Add(new CPluginVariable("        Time Zone used to determine current time", typeof(string), "CONFIG:"+this.m_strTimeZone.Replace("+", "%2B")));
+            this.m_LGPVList.Add(new CPluginVariable("Add voted map if a map list change removes it?", typeof(enumBoolYesNo), this.m_enPreserveVotedMap)); 
             this.m_LGPVList.Add(new CPluginVariable("Allow map-specific game presets?", typeof(enumBoolYesNo), this.m_enAllowPresets));
             this.m_LGPVList.Add(new CPluginVariable("    Send preset commands after every round?", typeof(enumBoolYesNo), this.m_enPresetsAlways));
             this.m_LGPVList.Add(new CPluginVariable("    Allow additional presets to be sent after each level loads?", typeof(enumBoolYesNo), this.m_enLoadPresets));
@@ -1157,6 +1170,11 @@ namespace PRoConEvents {
                 {
                     WritePluginConsole("INFO -> Current day/time on this system: " + DateTime.Now.ToString("dddd") + ", " + DateTime.Now.ToString("t"));
                 }
+            }
+            else if (strVariable.CompareTo("Add voted map if a map list change removes it?") == 0 && Enum.IsDefined(typeof(enumBoolYesNo), strValue) == true)
+            {
+                this.m_enPreserveVotedMap = (enumBoolYesNo)Enum.Parse(typeof(enumBoolYesNo), strValue);
+                UpdateVariableLists(strVariable, this.m_enPreserveVotedMap);
             }
             else if (strVariable.CompareTo("    Ignore 'Switch to new map list immediately' setting for time-based changes?") == 0 && Enum.IsDefined(typeof(enumBoolYesNo), strValue) == true)
             {
@@ -1729,16 +1747,22 @@ namespace PRoConEvents {
             {
                 this.m_iNextMapIndex = nextIndex;
             }
-            if (this.m_blCheckPlayerCount)
-            {
+            if (this.m_blCheckPlayerCount) {
                 this.m_blCheckPlayerCount = false;
                 if (this.m_blRoundEnded && !this.m_blRestartRequested)
                 {
+                    
                     this.ExecuteCommand("procon.protected.tasks.add", "CUltimateMapManager", "40", "1", "1", "procon.protected.plugins.call", "CUltimateMapManager", "CheckPlayerCount");
                 }
                 else
-                {
+                { 
+                    DateTime now = DateTime.Now; 
+                    TimeSpan diff = now - this.m_dtLastCheck;
+                    if(TimeSpan.Compare(diff, new TimeSpan(0, 0, 30)) != 1)
+                        return;
+                    this.m_dtLastCheck = now;
                     CheckPlayerCount();
+                    WritePluginConsole("CheckPlayerCount: " + this.m_iCurrentPlayerCount + " players"); 
                 }
             }
         }
@@ -1760,6 +1784,7 @@ namespace PRoConEvents {
             this.m_blRestartRequested = false;
             this.m_blCheckPlayerCount = true;
             this.m_iCurrentRoundCount++;
+            this.m_blMapVoteRunning = false;
             WritePluginConsole("INFO -> Round ended. Rounds run on this map list: " + this.m_iCurrentRoundCount);
             GetMapInfo();
         }      
@@ -1769,6 +1794,7 @@ namespace PRoConEvents {
             this.m_blRestartRequested = true;
             this.m_blCheckPlayerCount = true;
             this.m_iCurrentRoundCount++;
+            this.m_blMapVoteRunning = false;
             WritePluginConsole("INFO -> Round restart requested. Rounds run on this map list: " + this.m_iCurrentRoundCount);
             GetMapInfo();
         }
@@ -1778,6 +1804,7 @@ namespace PRoConEvents {
             this.m_blRestartRequested = true;
             this.m_blCheckPlayerCount = true;
             this.m_iCurrentRoundCount++;
+            this.m_blMapVoteRunning = false;
             WritePluginConsole("INFO -> Next round requested. Rounds run on this map list: " + this.m_iCurrentRoundCount);
             GetMapInfo();
         }      
@@ -1786,10 +1813,15 @@ namespace PRoConEvents {
             if (this.m_enLoadPresets == enumBoolYesNo.Yes) {
                 this.ExecuteCommand("procon.protected.tasks.add", "CUltimateMapManager", "5", "1", "1", "procon.protected.plugins.call", "CUltimateMapManager", "SetLoadPreset");
             }
-            if (this.m_iCurrentPlayerCount == 0) {
+            if (this.m_iCurrentPlayerCount >= 0) {
                 this.m_blCheckPlayerCount = true;
                 GetMapInfo();
             }
+            this.m_blRoundEnded = false;
+            this.m_blVotedMapMissing = false;
+            this.m_strVotedMapFileName = "";
+            this.m_strPresetVotedMap = "";
+            this.m_strVotedGameMode = "";
             WritePluginConsole("INFO -> Level loaded.");
         }
 
@@ -1822,13 +1854,38 @@ namespace PRoConEvents {
         public void VotedMapInfo(string mapFileName, string gameMode) {
             this.m_strVotedMapFileName = mapFileName;
             this.m_strVotedGameMode = gameMode;
+            foreach (MaplistConfig.MaplistInfo map in this.m_LMaplists[this.m_iCurrentMapList].Maplist)
+            {
+                if (map.MapFileName == this.m_strVotedMapFileName)
+                {
+                    if (map.Gamemode == this.m_strVotedGameMode) {
+                        this.m_strPresetVotedMap = map.Preset;
+                        break;
+                    }
+                }
+            }
+        }
+
+        public void MapVoteStarted() {
+            this.m_blMapVoteRunning = true;
+        }
+        
+        public void MapVoteStopped() {
+            this.m_blMapVoteRunning = false;
         }
 
         private void CheckPreset() {
-            if (this.m_strCurrentPreset != this.m_LMaplists[this.m_iCurrentMapList].Maplist[this.m_iNextMapIndex].Preset || this.m_enPresetsAlways == enumBoolYesNo.Yes)
-            {
-                this.m_strCurrentPreset = this.m_LMaplists[this.m_iCurrentMapList].Maplist[this.m_iNextMapIndex].Preset;
-                WritePluginConsole("WORK -> Next map: " + this.GetMapByFilename(this.m_LMaplists[this.m_iCurrentMapList].Maplist[this.m_iNextMapIndex].MapFileName).PublicLevelName + " (" + this.m_LMaplists[this.m_iCurrentMapList].Maplist[this.m_iNextMapIndex].PublicGamemode + "). Setting server preset to " + this.m_strCurrentPreset + ".");
+            if (this.m_strCurrentPreset != this.m_LMaplists[this.m_iCurrentMapList].Maplist[this.m_iNextMapIndex].Preset || this.m_enPresetsAlways == enumBoolYesNo.Yes || m_blVotedMapMissing) {
+                if (this.m_blVotedMapMissing) {
+                    if (String.IsNullOrEmpty(this.m_strPresetVotedMap))
+                        return;
+                    this.m_strCurrentPreset = this.m_strPresetVotedMap;
+                    WritePluginConsole("WORK -> Next map (Missing Voted Map): " + this.m_strVotedMapFileName + ". Setting server preset to " + this.m_strPresetVotedMap + ".");
+                }
+                else {
+                    this.m_strCurrentPreset = this.m_LMaplists[this.m_iCurrentMapList].Maplist[this.m_iNextMapIndex].Preset;
+                    WritePluginConsole("WORK -> Next map: " + this.GetMapByFilename(this.m_LMaplists[this.m_iCurrentMapList].Maplist[this.m_iNextMapIndex].MapFileName).PublicLevelName + " (" + this.m_LMaplists[this.m_iCurrentMapList].Maplist[this.m_iNextMapIndex].PublicGamemode + "). Setting server preset to " + this.m_strCurrentPreset + ".");
+                }
                 foreach (string setting in this.m_DPreset[this.m_strCurrentPreset])
                 {
                     if (setting.Length > 0 && setting.Substring(0,1).CompareTo("#") != 0)
@@ -1848,7 +1905,7 @@ namespace PRoConEvents {
         }
 
         public void SetLoadPreset() {
-            if (this.m_LMaplists[this.m_iCurrentMapList].Maplist[this.m_iNextMapIndex].LoadPreset != "None") {
+            if (this.m_LMaplists[this.m_iCurrentMapList].Maplist[this.m_iNextMapIndex].LoadPreset != "None" && !m_blVotedMapMissing) {
                 this.m_strCurrentPreset = this.m_LMaplists[this.m_iCurrentMapList].Maplist[this.m_iNextMapIndex].LoadPreset;
                 WritePluginConsole("WORK -> Level loaded. Setting server preset to " + this.m_strCurrentPreset + ".");
                 foreach (string setting in this.m_DPreset[this.m_strCurrentPreset])
@@ -1915,12 +1972,15 @@ namespace PRoConEvents {
             if (this.m_isPluginInitialized && this.m_enMapManager == enumBoolYesNo.Yes)
             {
                 // determine current map list
-                if (this.m_iCurrentMapList == -1)
+                int foundCurrentMapList = -1;
+                if (this.m_iCurrentMapList >= -1)
                 {
-                    int foundCurrentMapList = -1;
-                    foreach (MaplistConfig MCMaplist in this.m_LMaplists)
-                    {
-                        if (MCMaplist.Enabled == enumBoolYesNo.Yes && MCMaplist.Maplist.Count == this.m_LCurrentMapList.Count && this.m_iCurrentPlayerCount >= MCMaplist.MinPlayers && this.m_iCurrentPlayerCount <= MCMaplist.MaxPlayers && (this.m_enTimeOptions == enumBoolYesNo.No || this.m_enTimeOptions == enumBoolYesNo.Yes && MCMaplist.isValidDay(this.m_strTimeZone, (this.m_blUseSystemTZ && this.m_enUseSystemTZ == enumBoolYesNo.No), MCMaplist.TimeStart, MCMaplist.TimeStop)))
+                    foreach (MaplistConfig MCMaplist in this.m_LMaplists) {
+                        int neededSize = MCMaplist.Maplist.Count;
+                        if (this.m_blVotedMapMissing) {
+                            neededSize++;
+                        }
+                        if (MCMaplist.Enabled == enumBoolYesNo.Yes && neededSize == this.m_LCurrentMapList.Count && this.m_iCurrentPlayerCount >= MCMaplist.MinPlayers && this.m_iCurrentPlayerCount <= MCMaplist.MaxPlayers && (this.m_enTimeOptions == enumBoolYesNo.No || this.m_enTimeOptions == enumBoolYesNo.Yes && MCMaplist.isValidDay(this.m_strTimeZone, (this.m_blUseSystemTZ && this.m_enUseSystemTZ == enumBoolYesNo.No), MCMaplist.TimeStart, MCMaplist.TimeStop)))
                         {
                             foundCurrentMapList = MCMaplist.Index;
                             foreach (MaplistConfig.MaplistInfo MEMap in MCMaplist.Maplist)
@@ -1951,13 +2011,18 @@ namespace PRoConEvents {
                 //} else {
                 //    WritePluginConsole("DEBUG: No active list.");
                 //}
-                if (this.m_iCurrentMapList < 0 || this.m_LMaplists[this.m_iCurrentMapList].Enabled == enumBoolYesNo.No || (this.m_iCurrentRoundCount >= this.m_LMaplists[this.m_iCurrentMapList].MinRounds || this.m_iCurrentMapList == -1 || this.m_iCurrentPlayerCount == 0) && (this.m_enCompleteRounds == enumBoolYesNo.No || this.m_enCompleteRounds == enumBoolYesNo.Yes && (this.m_iCurrentPlayerCount == 0 || this.m_blRoundEnded && (this.m_blRestartRequested && this.m_blIsFirstRound || !this.m_blRestartRequested && this.m_blIsLastRound))) && (this.m_iCurrentMapList == -1 || this.m_iCurrentPlayerCount > this.m_LMaplists[this.m_iCurrentMapList].MaxPlayers || this.m_iCurrentPlayerCount < this.m_LMaplists[this.m_iCurrentMapList].MinPlayers || this.m_enTimeOptions == enumBoolYesNo.Yes && (this.m_enTimeNotNow == enumBoolYesNo.No || this.m_enTimeNotNow == enumBoolYesNo.Yes && (this.m_iCurrentPlayerCount == 0 || this.m_blRoundEnded)) && !this.m_LMaplists[this.m_iCurrentMapList].isValidDay(this.m_strTimeZone, (this.m_blUseSystemTZ && this.m_enUseSystemTZ == enumBoolYesNo.No), this.m_LMaplists[this.m_iCurrentMapList].TimeStart, this.m_LMaplists[this.m_iCurrentMapList].TimeStop)))
+                if (this.m_iCurrentMapList < 0 || foundCurrentMapList < 0 || this.m_LMaplists[this.m_iCurrentMapList].Enabled == enumBoolYesNo.No || (this.m_iCurrentRoundCount >= this.m_LMaplists[this.m_iCurrentMapList].MinRounds || this.m_iCurrentMapList == -1 || this.m_iCurrentPlayerCount == 0) && (this.m_enCompleteRounds == enumBoolYesNo.No || this.m_enCompleteRounds == enumBoolYesNo.Yes && (this.m_iCurrentPlayerCount == 0 || this.m_blRoundEnded && (this.m_blRestartRequested && this.m_blIsFirstRound || !this.m_blRestartRequested && this.m_blIsLastRound))) && (this.m_iCurrentMapList == -1 || this.m_iCurrentPlayerCount > this.m_LMaplists[this.m_iCurrentMapList].MaxPlayers || this.m_iCurrentPlayerCount < this.m_LMaplists[this.m_iCurrentMapList].MinPlayers || this.m_enTimeOptions == enumBoolYesNo.Yes && (this.m_enTimeNotNow == enumBoolYesNo.No || this.m_enTimeNotNow == enumBoolYesNo.Yes && (this.m_iCurrentPlayerCount == 0 || this.m_blRoundEnded)) && !this.m_LMaplists[this.m_iCurrentMapList].isValidDay(this.m_strTimeZone, (this.m_blUseSystemTZ && this.m_enUseSystemTZ == enumBoolYesNo.No), this.m_LMaplists[this.m_iCurrentMapList].TimeStart, this.m_LMaplists[this.m_iCurrentMapList].TimeStop)))
                 {
                     foreach (MaplistConfig MCMaplist in this.m_LMaplists)
                     {
                         if (MCMaplist.Enabled == enumBoolYesNo.Yes && this.m_iCurrentPlayerCount >= MCMaplist.MinPlayers && this.m_iCurrentPlayerCount <= MCMaplist.MaxPlayers && (this.m_enTimeOptions == enumBoolYesNo.No || this.m_enTimeOptions == enumBoolYesNo.Yes && MCMaplist.isValidDay(this.m_strTimeZone, (this.m_blUseSystemTZ && this.m_enUseSystemTZ == enumBoolYesNo.No), MCMaplist.TimeStart, MCMaplist.TimeStop)))
                         {
                             WritePluginConsole("TASK -> " + this.m_iCurrentPlayerCount + " players. Need to change to Map List " + MCMaplist.Index + " [" + MCMaplist.Name + "].");
+                            if (this.m_blMapVoteRunning)
+                            {
+                                WritePluginConsole("WARN -> Not changing map list! Map vote running. Waiting for the vote to finish!");     
+                                return;
+                            }
                             this.m_iCurrentMapList = MCMaplist.Index;
                             mapListChanged = true;
                             break;
@@ -1981,21 +2046,26 @@ namespace PRoConEvents {
                     this.m_iCurrentRoundCount = 0;
                     WritePluginConsole("WORK -> Changing to Map List " + this.m_iCurrentMapList + " [" + this.m_LMaplists[this.m_iCurrentMapList].Name + "].");
                     List<MaplistConfig.MaplistInfo> mapList = new List<MaplistConfig.MaplistInfo>(this.m_LMaplists[this.m_iCurrentMapList].Maplist);
+                    // Randomize map list
                     if (this.m_LMaplists[this.m_iCurrentMapList].MapListStart.CompareTo("Randomize entire map list") == 0)
                     {
                         mapList = Shuffle(mapList);
                     }
+                    
                     int mapIndex = 0;
                     int nextMapIndex = 0;
+                    // set start map
                     if (this.m_strVotedMapFileName != "")
                     {
+                        // Set voted map
+                        this.m_blVotedMapMissing = true;
                         foreach (MaplistConfig.MaplistInfo MEMap in mapList)
                         {
                             if (MEMap.MapFileName == this.m_strVotedMapFileName)
                             {
                                 nextMapIndex = mapIndex;
-                                if (MEMap.Gamemode == this.m_strVotedGameMode)
-                                {
+                                if (MEMap.Gamemode == this.m_strVotedGameMode) {
+                                    this.m_blVotedMapMissing = false;
                                     break;
                                 }
                             }
@@ -2004,6 +2074,7 @@ namespace PRoConEvents {
                     }
                     else if (this.m_LMaplists[this.m_iCurrentMapList].MapListStart.CompareTo("Start with random map") == 0)
                     {
+                        // Set a radom map
                         int randomNumber = (new Random()).Next(0, mapList.Count-1);
                         if (this.m_strCurrentMap == mapList[randomNumber].MapFileName)
                         {
@@ -2016,10 +2087,12 @@ namespace PRoConEvents {
                     }
                     else if ((this.m_LMaplists[this.m_iCurrentMapList].MapListStart.CompareTo("Start with first map unless it was just played") == 0 || this.m_LMaplists[this.m_iCurrentMapList].MapListStart.CompareTo("Randomize entire map list") == 0) && this.m_strCurrentMap == mapList[0].MapFileName)
                     {
+                        // start with first map unless it was just played
                         nextMapIndex = 1;
                     }
                     else if (this.m_LMaplists[this.m_iCurrentMapList].MapListStart.CompareTo("Start with map after the map that was just played") == 0)
                     {
+                        // start with map after the map that was just played
                         foreach (MaplistConfig.MaplistInfo MEMap in mapList)
                         {
                             if (MEMap.MapFileName == this.m_strCurrentMap)
@@ -2032,6 +2105,7 @@ namespace PRoConEvents {
                     }
                     else if (this.m_LMaplists[this.m_iCurrentMapList].MapListStart.CompareTo("Start with same map that was just played") == 0)
                     {
+                        // start with the same map that was just played
                         foreach (MaplistConfig.MaplistInfo MEMap in mapList)
                         {
                             if (MEMap.MapFileName == this.m_strCurrentMap)
@@ -2042,20 +2116,41 @@ namespace PRoConEvents {
                             mapIndex++;
                         }
                     }
+                    // update members
                     this.m_iNextMapIndex = nextMapIndex;
+                    
+                    // check presets
                     if (this.m_enAllowPresets == enumBoolYesNo.Yes) {
                         CheckPreset();
                     }
+                    
+                    WritePluginConsole("DEBUG -> Changing the list now!");
+                    
+                    // Apply changes to map list
                     this.ExecuteCommand("procon.protected.send", "mapList.clear");
+                    
+                    // add maps to map list
                     foreach (MaplistConfig.MaplistInfo MEMap in mapList)
                     {
                         this.ExecuteCommand("procon.protected.send", "mapList.add", MEMap.MapFileName, MEMap.Gamemode, MEMap.Rounds.ToString());
                     }
+                    
+                    // Add missing voted map if activated and needed
+                    if (this.m_enPreserveVotedMap == enumBoolYesNo.Yes && this.m_blVotedMapMissing == true)
+                    {
+                        this.ExecuteCommand("procon.protected.send", "mapList.add", this.m_strVotedMapFileName, this.m_strVotedGameMode, "1");
+                        nextMapIndex = mapList.Count;
+                    }
+                    
+                    
+                    // Set next map
                     this.ExecuteCommand("procon.protected.send", "mapList.setNextMapIndex", nextMapIndex.ToString());
+                    
                     if (this.m_iCurrentPlayerCount == 0 && (!this.m_blRoundEnded || this.m_blRoundEnded && this.m_blRestartRequested) || this.m_enRestartNow == enumBoolYesNo.Yes && this.m_iCurrentPlayerCount <= this.m_iRestartLimit && !this.m_blRoundEnded)
                     {
-                        this.m_iCurrentRoundCount = -1;
-                        if (this.m_enRestartWarning == enumBoolYesNo.Yes && this.m_iCurrentPlayerCount > 0)
+                        // this.m_iCurrentRoundCount = -1;
+                        this.m_iCurrentMapList = 0;
+                        if (this.m_enRestartWarning == enumBoolYesNo.Yes && this.m_iCurrentPlayerCount > 0 && this.m_iCurrentPlayerCount < 6)
                         {
                             if (this.m_strServerGameType == "bf3" || this.m_strServerGameType == "bf4" || this.m_strServerGameType == "bfhl") {
                                 this.ExecuteCommand("procon.protected.send", "admin.yell", this.m_strRestartWarningMessage.Replace("[listname]", this.m_LMaplists[this.m_iCurrentMapList].Name).Replace("[secs]", this.m_enRestartWarningTime.ToString()), (this.m_enRestartWarningTime +1).ToString(), "all");
@@ -2064,13 +2159,17 @@ namespace PRoConEvents {
                             }
                             this.ExecuteCommand("procon.protected.tasks.add", "CUltimateMapManager", (this.m_enRestartWarningTime + 3).ToString(), "1", "1", "procon.protected.plugins.call", "CUltimateMapManager", "DelayedNextRound");
                         }
+                        else if (this.m_iCurrentPlayerCount == 0) 
+                        {
+                            this.ExecuteCommand("procon.protected.send", "mapList.runNextRound");    
+                        }
                         else
                         {
-                            this.ExecuteCommand("procon.protected.send", "mapList.runNextRound");
+                            // this.ExecuteCommand("procon.protected.send", "mapList.runNextRound");
                         }
                     }
-                    this.m_strVotedMapFileName = "";
-                    this.m_strVotedGameMode = "";
+                    // this.m_strVotedMapFileName = "";
+                    // this.m_strVotedGameMode = "";
                 }
                 else if (this.m_enAllowPresets == enumBoolYesNo.Yes && this.m_blRoundEnded)
                 {
