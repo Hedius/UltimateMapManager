@@ -456,7 +456,7 @@ namespace PRoConEvents {
         }
 
         public string GetPluginAuthor() {
-            return "falcontx";
+            return "falcontx, Hedius";
         }
 
         public string GetPluginWebsite() {
@@ -562,6 +562,12 @@ namespace PRoConEvents {
 
 <br><h2>Development</h2>
     <br><h3>Changelog</h3>
+      <blockquote><h4>1.2.6.1 (09/21/2021)</h4>
+            -  Issue round restarts on low population<br/>
+      </blockquote>
+      <blockquote><h4>1.2.6.0 (04/17/2021)</h4>
+            - Full xVotemap support<br/>
+      </blockquote>
       <blockquote><h4>1.2.5.0 (03/26/2015)</h4>
             - added support for BFHL<br/>
       </blockquote>
