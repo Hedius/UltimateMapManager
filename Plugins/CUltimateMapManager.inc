@@ -126,7 +126,7 @@ namespace PRoConEvents {
                     this.Gamemode = "ConquestLarge0";
                     this.PublicGamemode = "Conquest Large";
                     this.MapFileName = "MP_001";
-                    this.Rounds = 2;
+                    this.Rounds = 1;
                     this.Index = iIndex;
                     this.Preset = "Normal";
                     this.LoadPreset = "None";
